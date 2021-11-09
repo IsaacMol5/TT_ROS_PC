@@ -3,24 +3,29 @@ import tensorflow as tf
 from tensorflow.keras.models import load_model
 import rospy
 from sensor_msgs.msg import CompressedImage
+from std_msgs.msg import Int8MultiArray
 import numpy as np
 import cv2
+import time
 
 class Angle_Acc_CNN():
     def __init__(self):
         self.session = tf.compat.v1.keras.backend.get_session()
         self.model = load_model('/home/isaac/pesos_redes/steer.h5', compile=False)
-        rospy.Subscriber('/raspicam_node/image/compressed', CompressedImage, self.callback)  
+        rospy.Subscriber('/fisheye/image/compressed', CompressedImage, self.callback)  
+        self.pub = rospy.Publisher('/control_angle_and_acc', Int8MultiArray, queue_size = 2)
+        self.my_msg = Int8MultiArray()  
 
     def convert_angle_and_acceleration(self, cnn_predict):
         CNN_angle = cnn_predict[0]
         CNN_acceleration = cnn_predict[1]
         #Convert angle predict to angle for servomotor
         if(CNN_angle <= 0):
-            angle = CNN_angle * 75
-            angle = int(abs(angle) + 90) #turn left
+            angle = CNN_angle * 35
+            angle = int(abs(angle)) #turn left
         else:
-            angle = int((((1 - CNN_angle) * 75)) + 15) #turn right
+            angle = CNN_angle * -35
+            angle = int(angle) #turn right
 
         #Convert accelaration predict to acceleration for motor
         acceleration = 0
@@ -41,6 +46,12 @@ class Angle_Acc_CNN():
             print(predict)
             motor_predict = self.convert_angle_and_acceleration(predict)
             print(motor_predict)
+            time.sleep(0.4)
+            self.publisher(motor_predict)
+        
+    def publisher(self, motor_predict):
+        self.my_msg.data = [motor_predict[0],motor_predict[1]]
+        self.pub.publish(self.my_msg)
 
 
 def main():
