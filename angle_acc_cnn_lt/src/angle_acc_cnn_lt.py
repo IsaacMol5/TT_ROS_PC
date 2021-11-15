@@ -12,7 +12,7 @@ class Angle_Acc_CNN():
     def __init__(self):
         self.session = tf.compat.v1.keras.backend.get_session()
         self.model = load_model('/home/isaac/pesos_redes/steer.h5', compile=False)
-        rospy.Subscriber('/fisheye/image/compressed', CompressedImage, self.callback)  
+        rospy.Subscriber('/fisheye_correction/image/compressed', CompressedImage, self.callback)  
         self.pub = rospy.Publisher('/control_angle_and_acc', Int8MultiArray, queue_size = 2)
         self.my_msg = Int8MultiArray()  
 
@@ -46,7 +46,7 @@ class Angle_Acc_CNN():
             print(predict)
             motor_predict = self.convert_angle_and_acceleration(predict)
             print(motor_predict)
-            time.sleep(0.4)
+            #time.sleep(0.4)
             self.publisher(motor_predict)
         
     def publisher(self, motor_predict):

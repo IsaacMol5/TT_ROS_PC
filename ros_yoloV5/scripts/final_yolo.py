@@ -185,7 +185,7 @@ if __name__ == '__main__':
     模型初始化
     '''
     rospy.init_node('ros_yolo')
-    image_topic_1 = "/usb_cam/image_raw"
+    image_topic_1 = "/fisheye_correction/image"
     rospy.Subscriber(image_topic_1, Image, image_callback_1, queue_size=1, buff_size=52428800)
     image_pub = rospy.Publisher('/yolo_result_out', Image, queue_size=1)
     #rospy.init_node("yolo_result_out_node", anonymous=True)
