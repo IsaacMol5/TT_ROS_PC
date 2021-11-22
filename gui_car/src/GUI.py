@@ -1,11 +1,5 @@
 #!/usr/bin/env python3
 
-# # File name   : client.py
-# Description : client  
-# Website	 : www.adeept.com
-# Author	  : William
-# Date		: 2019/11/21
-
 import rospy
 import numpy as np
 import cv2 
@@ -29,12 +23,13 @@ class Car():
         self.on = True
 
     def callback(self, data):
-        global frame, angle_for_training, acc_for_training 
+        global frame, angle_for_training, acc_for_training, num_video, num_frame
         np_arr = np.fromstring(data.data, np.uint8)
         frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
-        print("llego un frame")
-
-        #self.publisher(img_undistorsion)
+        #print("Llego un frame")
+        cv2.imwrite("/home/isaac/training_angle/"+"Video"+str(num_video)+"_"+str(num_frame)+"_"+str(angle_for_training)+"_"+str(acc_for_training)+".jpg",frame)
+        num_frame = num_frame + 1
+        
     
     def publisher(self, commands):
         self.my_msg.data = [commands[0], commands[1], commands[2], commands[3]]
@@ -61,17 +56,20 @@ class GUI_Car():
 		root.geometry('1000x800') 
 
 	def call_forward(self, e):
+		global angle_for_training, acc_for_training 
 		global node
 		print("Forward")
 		acc = int(self.pwm_vel_gui.get())#PWM
 		print(acc)
 		if(self.DS_gui == 0):
+			acc_for_training = acc
 			self.acc_car = acc
 			self.FB_gui = 0
 			node.publisher([0, self.acc_car, self.angle_car, self.FB_gui])#[RC car, acc_car, angle_car, forward]
 			self.DS_gui == 1
 
 	def call_backward(self, e):
+		global angle_for_training, acc_for_training 
 		global node
 		print("Backward")
 		acc =  int(self.pwm_vel_gui.get())
@@ -83,32 +81,40 @@ class GUI_Car():
 			self.DS_gui == 1
 
 	def call_up_fb(self, e): #Stop motor for back wheels
+		global angle_for_training, acc_for_training 
 		global node
 		print("DS")
+		acc_for_training = 0
 		self.acc_car = 0
 		node.publisher([0, 0, self.angle_car, self.FB_gui])
 		self.DS_gui = 0
 
 	def call_right(self, e):
+		global angle_for_training, acc_for_training 
 		global node
 		print("Right")
 		if(self.ST_gui == 0):
-			self.angle_car = -30
+			angle_for_training = -34
+			self.angle_car = -34
 			node.publisher([0, self.acc_car, self.angle_car, self.FB_gui])#[RC car, acc_car, angle_car, backward]
 			self.ST_gui == 1
 
 	def call_left(self, e):
+		global angle_for_training, acc_for_training 
 		global node
 		print("Left")
 		if(self.ST_gui == 0):
-			self.angle_car = 30
+			angle_for_training = 34
+			self.angle_car = 34
 			node.publisher([0, self.acc_car, self.angle_car, self.FB_gui])#[RC car, acc_car, angle_car, backward]
 			self.ST_gui == 1
 
 	def call_up_rl(self, e): #Stop servo for front wheels
+		global angle_for_training, acc_for_training 
 		global node
 		print("ST")
 		self.angle_car = 0
+		angle_for_training = 0
 		node.publisher([0, self.acc_car, self.angle_car, self.FB_gui])
 		self.DS_gui = 0
 
@@ -160,6 +166,8 @@ frame = 1
 pwm_vel = 0
 angle_for_training = 0
 acc_for_training = 0
+num_frame = 0
+num_video = 3#Cambiar por cada prueba de entrenamiento -------------------------------------------------------
 def init_node():
 	global node
 	rospy.init_node("GUI_car")

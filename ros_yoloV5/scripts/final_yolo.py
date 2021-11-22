@@ -1,38 +1,28 @@
 #! /usr/bin/env python3
 
-
 import roslib
 import rospy
 from std_msgs.msg import Header
 from std_msgs.msg import String
-from sensor_msgs.msg import CompressedImage
 from sensor_msgs.msg import Image
-IMAGE_WIDTH=1241
-IMAGE_HEIGHT=376
+from sensor_msgs.msg import CompressedImage
+from pathlib import Path
 
-import sys
-#sys.path.remove('/opt/ros/kinetic/lib/python2.7/dist-packages')
-
-
-
-
-import os
-import time
+import numpy as np
 import cv2
 import torch
-from numpy import random
 import torch.backends.cudnn as cudnn
-import numpy as np
+
 from models.experimental import attempt_load
-from utils.general import (
-    check_img_size, non_max_suppression, apply_classifier, scale_coords,
-    xyxy2xywh, plot_one_box, strip_optimizer, set_logging)
-from utils.torch_utils import select_device, load_classifier, time_synchronized
+from utils.datasets import LoadImages, LoadStreams
+from utils.general import apply_classifier, check_img_size, check_imshow, check_requirements, check_suffix, colorstr, \
+    increment_path, non_max_suppression, print_args, save_one_box, scale_coords, set_logging, \
+    strip_optimizer, xyxy2xywh
+from utils.plots import Annotator, colors
+from utils.torch_utils import load_classifier, select_device, time_sync
 
-from matplotlib import pyplot as plt
 
-ros_image=0
-
+ros_image = 0
 
 def letterbox(img, new_shape=(640, 640), color=(114, 114, 114), auto=True, scaleFill=False, scaleup=True):
     # Resize image to a 32-pixel-multiple rectangle https://github.com/ultralytics/yolov3/issues/232
@@ -65,129 +55,150 @@ def letterbox(img, new_shape=(640, 640), color=(114, 114, 114), auto=True, scale
     left, right = int(round(dw - 0.1)), int(round(dw + 0.1))
     img = cv2.copyMakeBorder(img, top, bottom, left, right, cv2.BORDER_CONSTANT, value=color)  # add border
     return img, ratio, (dw, dh)
-def loadimg(img):  # 接受opencv图片
+    
+def loadimg(img):
     img_size=640
     cap=None
     path=None
     img0 = img
     img = letterbox(img0, new_shape=img_size)[0]
-    img = img[:, :, ::-1].transpose(2, 0, 1)  # BGR to RGB, to 3x416x416
+    img = img.transpose((2, 0, 1))[::-1]  # HWC to CHW, BGR to RGB
     img = np.ascontiguousarray(img)
     return path, img, img0, cap
-# src=cv2.imread('biye.jpg')
+
 def detect(img):
-
-    time1 = time.time()
-
-    global ros_image
-    cudnn.benchmark = True
     dataset = loadimg(img)
-    # print(dataset[3])
-    #plt.imshow(dataset[2][:, :, ::-1])
-    names = model.module.names if hasattr(model, 'module') else model.names
-    #colors = [[random.randint(0, 255) for _ in range(3)] for _ in range(len(names))]
-    #colors=[[0,255,0]]
-    augment = 'store_true'
+
+    view_img = True
     conf_thres = 0.3
     iou_thres = 0.45
-    classes = (0,1,2,3,5,7)
-    agnostic_nms = 'store_true'
-    img = torch.zeros((1, 3, imgsz, imgsz), device=device)  # init img
-    _ = model(img.half() if half else img) if device.type != 'cpu' else None  # run once
+    line_thickness=3
+    cudnn.benchmark = True
+    pt = True 
+    augment=False
+    agnostic_nms = False
+    hide_labels=False
+    hide_conf=False
+    max_det=1000
+    classes = None
+    stride = int(model.stride.max())  # model stride
+    names = model.module.names if hasattr(model, 'module') else model.names  # get class names
+    if half:
+        model.half()  # to FP16
+    #imgsz = check_img_size(imgsz, s=stride)  # check image size
     path = dataset[0]
     img = dataset[1]
     im0s = dataset[2]
     vid_cap = dataset[3]
+
+    # Run inference
+    if pt and device.type != 'cpu':
+        model(torch.zeros(1, 3, *imgsz).to(device).type_as(next(model.parameters())))  # run once
+    dt, seen = [0.0, 0.0, 0.0], 0
+    
+    t1 = time_sync()
     img = torch.from_numpy(img).to(device)
     img = img.half() if half else img.float()  # uint8 to fp16/32
     img /= 255.0  # 0 - 255 to 0.0 - 1.0
+    if len(img.shape) == 3:
+        img = img[None]  # expand for batch dim
+    t2 = time_sync()
+    dt[0] += t2 - t1
 
-    time2 = time.time()
-    if img.ndimension() == 3:
-        img = img.unsqueeze(0)
-    # Inference
-    pred = model(img, augment=augment)[0]
-    # Apply NMS
-    pred = non_max_suppression(pred, conf_thres, iou_thres, classes=classes, agnostic=agnostic_nms)
 
-    view_img = 1
-    save_txt = 1
-    save_conf = 'store_true'
-    time3 = time.time()
+    pred = model(img, augment=augment, visualize=False)[0]
 
-    for i, det in enumerate(pred):  # detections per image
+    t3 = time_sync()
+    dt[1] += t3 - t2
+
+    # NMS
+    pred = non_max_suppression(pred, conf_thres, iou_thres, classes, agnostic_nms, max_det=max_det)
+    dt[2] += time_sync() - t3
+
+    signals_detected = []
+    n1 = 0
+    # Process predictions
+    for i, det in enumerate(pred):  # per image
+        seen += 1
         p, s, im0 = path, '', im0s
         s += '%gx%g ' % img.shape[2:]  # print string
         gn = torch.tensor(im0.shape)[[1, 0, 1, 0]]  # normalization gain whwh
-        if det is not None:
-            #print(det)
+        #imc = im0.copy() if save_crop else im0  # for save_crop
+        annotator = Annotator(im0, line_width=line_thickness, example=str(names))
+        if len(det):
             # Rescale boxes from img_size to im0 size
             det[:, :4] = scale_coords(img.shape[2:], det[:, :4], im0.shape).round()
+
             # Print results
             for c in det[:, -1].unique():
                 n = (det[:, -1] == c).sum()  # detections per class
-                s += '%g %ss, ' % (n, names[int(c)])  # add to string
-                # Write results
-            for *xyxy, conf, cls in reversed(det):
-                if save_txt:  # Write to file
-                    xywh = (xyxy2xywh(torch.tensor(xyxy).view(1, 4)) / gn).view(-1).tolist()  # normalized xywh
-                    line = (cls, conf, *xywh) if save_conf else (cls, *xywh)  # label format
-                if view_img:  # Add bbox to image
-                    label = '%s %.2f' % (names[int(cls)], conf)
-                    plot_one_box(xyxy, im0, label=label, color=[0,255,0], line_thickness=3)
-    time4 = time.time()
-    print('************')
-    print('2-1', time2 - time1)
-    print('3-2', time3 - time2)
-    print('4-3', time4 - time3)
-    print('total',time4-time1)
-    # Print time (inference + NMS)
-    print('%sDone.' % (s))
-    out_img = im0[:, :, [2, 1, 0]]
-    ros_image=out_img
-    cv2.imshow('YOLOV5', out_img)
-    a = cv2.waitKey(1)
-    #### Create CompressedIamge ####
-    publish_image(im0)
+                signals_detected.append(names[int(c)])
+                s += f"{n} {names[int(c)]}{'s' * (n > 1)}, "  # add to string
 
-def image_callback_1(image):
-    global ros_image
-    ros_image = np.frombuffer(image.data, dtype=np.uint8).reshape(image.height, image.width, -1)
-    with torch.no_grad():
-        detect(ros_image)
-def publish_image(imgdata):
-    image_temp=Image()
-    header = Header(stamp=rospy.Time.now())
-    header.frame_id = 'map'
-    image_temp.height=IMAGE_HEIGHT
-    image_temp.width=IMAGE_WIDTH
-    image_temp.encoding='rgb8'
-    image_temp.data=np.array(imgdata).tostring()
-    #print(imgdata)
-    #image_temp.is_bigendian=True
-    image_temp.header=header
-    image_temp.step=1241*3
+            # Write results
+            for *xyxy, conf, cls in reversed(det):
+
+                if view_img:  # Add bbox to image
+                    c = int(cls)  # integer class
+                    label = None if hide_labels else (names[c] if hide_conf else f'{names[c]} {conf:.2f}')
+                    annotator.box_label(xyxy, label, color=colors(c, True))
+                    posicion_rectangule = xyxy
+        # Print time (inference-only)
+        print(f'{s}Done. ({t3 - t2:.3f}s)')
+        signals_detected = set(signals_detected)
+        publish_classes(signals_detected)
+        publish_image(im0)
+        # Stream results
+        #im0 = annotator.result()
+        #cv2.imshow("YoloV5_ROS", im0)
+        #cv2.waitKey(1)  # 1 millisecond
+    #height, width = im0.shape[:2]
+    #print((height, width))
+    #print("Classes: "+ str(signals_detected))
+    #print(posicion_rectangule.index(0))
+    # Print results
+    #t = tuple(x / seen * 1E3 for x in dt)  # speeds per image
+
+    #print(f'Speed: %.1fms pre-process, %.1fms inference, %.1fms NMS per image at shape {(1, 3, *imgsz)}' % t)
+    
+def publish_image(im0):
+    image_temp = CompressedImage()
+    image_temp.header.stamp = rospy.Time.now()
+    image_temp.format = "jpeg"
+    image_temp.data = np.array(cv2.imencode('.jpg', im0)[1]).tostring()
     image_pub.publish(image_temp)
 
+def publish_classes(classes):
+    classes = "-".join(classes)
+    classes_pub.publish(classes)
+
+def image_callback(image):
+    global ros_image
+    ros_image = np.frombuffer(image.data, dtype=np.uint8).reshape(image.height, image.width, -1)
+    #ros_image = cv2.cvtColor(ros_image, cv2.COLOR_BGR2RGB)
+    #ros_image = cv2.imdecode(np.frombuffer(image.data, np.uint8), cv2.IMREAD_COLOR)
+    ros_image = cv2.resize(ros_image, dsize=(640, 480))
+    # Print results
+    with torch.no_grad():
+        detect(ros_image)
 
 if __name__ == '__main__':
     set_logging()
     device = ''
     device = select_device(device)
     half = device.type != 'cpu'  # half precision only supported on CUDA
-    weights = 'yolov5s.pt'
+    weights = 'best.pt'
     imgsz = 640
     model = attempt_load(weights, map_location=device)  # load FP32 model
+    #model = load_model(device)
     imgsz = check_img_size(imgsz, s=model.stride.max())  # check img_size
-    if half:
-        model.half()  # to FP16
-    '''
-    模型初始化
-    '''
-    rospy.init_node('ros_yolo')
+  
+    rospy.init_node('ros_yolo_sf')
+    image_topic= "/usb_cam/image_raw"
     image_topic_1 = "/fisheye_correction/image"
-    rospy.Subscriber(image_topic_1, Image, image_callback_1, queue_size=1, buff_size=52428800)
-    image_pub = rospy.Publisher('/yolo_result_out', Image, queue_size=1)
+    rospy.Subscriber(image_topic_1, Image, image_callback, queue_size=1, buff_size=52428800)
+    image_pub = rospy.Publisher('/ros_yolo_sf/image', CompressedImage, queue_size=1)
+    classes_pub = rospy.Publisher('/ros_yolo_sf/traffic_signals', String, queue_size=1)
     #rospy.init_node("yolo_result_out_node", anonymous=True)
     
 
