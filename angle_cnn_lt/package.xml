@@ -1,6 +1,6 @@
 <?xml version="1.0"?>
 <package format="2">
-  <name>angle_acc_cnn_lt</name>
+  <name>angle_cnn_lt</name>
   <version>0.0.0</version>
   <description>The angle_acc_cnn_lt package</description>
 

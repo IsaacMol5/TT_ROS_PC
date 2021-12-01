@@ -3,6 +3,8 @@
 import rospy
 import numpy as np
 import cv2 
+from PIL import Image as Img
+from PIL import ImageTk
 from sensor_msgs.msg import CompressedImage
 from std_msgs.msg import Int8MultiArray
 import sys
@@ -13,29 +15,6 @@ import tkinter as tk
 from tkinter import *
 
 os.system('xset r off')
-
-class Car():
-    def __init__(self):
-        rospy.Subscriber('/fisheye_correction/image/compressed', CompressedImage, self.callback)  
-        self.comm = rospy.Publisher('/car/commands', Int8MultiArray, queue_size = 2)
-        self.my_msg = Int8MultiArray()
-        #self.t = threading.Thread(name = "2.0", target = self.callback)
-        self.on = True
-
-    def callback(self, data):
-        global frame, angle_for_training, acc_for_training, num_video, num_frame
-        np_arr = np.fromstring(data.data, np.uint8)
-        frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
-        #print("Llego un frame")
-        cv2.imwrite("/home/isaac/training_angle/"+"Video"+str(num_video)+"_"+str(num_frame)+"_"+str(angle_for_training)+"_"+str(acc_for_training)+".jpg",frame)
-        num_frame = num_frame + 1
-        
-    
-    def publisher(self, commands):
-        self.my_msg.data = [commands[0], commands[1], commands[2], commands[3]]
-        self.comm.publish(self.my_msg)
-
-
 
 class GUI_Car():
 	label_pwm_vel_gui = 0
@@ -49,11 +28,40 @@ class GUI_Car():
 	DS_gui = 0
 	ST_gui = 0
 	FB_gui = 0
+	comm = 0
+	angle_default = 35
+	my_msg = Int8MultiArray()
 	def __init__(self):
+		rospy.init_node("GUI_car")
+		rospy.Subscriber('/fisheye_correction/image/compressed', CompressedImage, self.callback)  
+		self.comm = rospy.Publisher('/car/commands', Int8MultiArray, queue_size = 2)
+		self.my_msg = Int8MultiArray()
+        #self.t = threading.Thread(name = "2.0", target = self.callback)
+		self.on = True
+
 		global root
 		root = tk.Tk()	
 		root.title('Selfdriving Car ESCOM GUI')	  
 		root.geometry('1000x800') 
+	
+	def callback(self, data):
+		global frame, angle_for_training, acc_for_training, num_video, num_frame
+		np_arr = np.fromstring(data.data, np.uint8)
+		frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+
+		#frame = imutils.resize(frame, width=640)
+		cv2.imwrite("/home/isaac/training_angle/"+"Video"+str(num_video)+"_"+str(num_frame)+"_"+str(angle_for_training)+"_"+str(acc_for_training)+".jpg",frame)
+		frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+		im = Img.fromarray(frame)
+		img = ImageTk.PhotoImage(image=im)
+		self.lblVideo.configure(image=img)
+		self.lblVideo.image = img
+        #print("Llego un frame")
+		num_frame = num_frame + 1
+
+	def publisher(self, commands):
+		self.my_msg.data = [commands[0], commands[1], commands[2], commands[3]]
+		self.comm.publish(self.my_msg)
 
 	def call_forward(self, e):
 		global angle_for_training, acc_for_training 
@@ -65,7 +73,7 @@ class GUI_Car():
 			acc_for_training = acc
 			self.acc_car = acc
 			self.FB_gui = 0
-			node.publisher([0, self.acc_car, self.angle_car, self.FB_gui])#[RC car, acc_car, angle_car, forward]
+			self.publisher([0, self.acc_car, self.angle_car, self.FB_gui])#[RC car, acc_car, angle_car, forward]
 			self.DS_gui == 1
 
 	def call_backward(self, e):
@@ -77,7 +85,7 @@ class GUI_Car():
 		if(self.DS_gui == 0):
 			self.acc_car = acc
 			self.FB_gui = 1
-			node.publisher([0, self.acc_car, self.angle_car, self.FB_gui])#[RC car, acc_car, angle_car, backward]
+			self.publisher([0, self.acc_car, self.angle_car, self.FB_gui])#[RC car, acc_car, angle_car, backward]
 			self.DS_gui == 1
 
 	def call_up_fb(self, e): #Stop motor for back wheels
@@ -86,7 +94,7 @@ class GUI_Car():
 		print("DS")
 		acc_for_training = 0
 		self.acc_car = 0
-		node.publisher([0, 0, self.angle_car, self.FB_gui])
+		self.publisher([0, 0, self.angle_car, self.FB_gui])
 		self.DS_gui = 0
 
 	def call_right(self, e):
@@ -94,9 +102,9 @@ class GUI_Car():
 		global node
 		print("Right")
 		if(self.ST_gui == 0):
-			angle_for_training = -34
-			self.angle_car = -34
-			node.publisher([0, self.acc_car, self.angle_car, self.FB_gui])#[RC car, acc_car, angle_car, backward]
+			angle_for_training = -(self.angle_default)
+			self.angle_car = -(self.angle_default)
+			self.publisher([0, self.acc_car, self.angle_car, self.FB_gui])#[RC car, acc_car, angle_car, backward]
 			self.ST_gui == 1
 
 	def call_left(self, e):
@@ -104,9 +112,9 @@ class GUI_Car():
 		global node
 		print("Left")
 		if(self.ST_gui == 0):
-			angle_for_training = 34
-			self.angle_car = 34
-			node.publisher([0, self.acc_car, self.angle_car, self.FB_gui])#[RC car, acc_car, angle_car, backward]
+			angle_for_training = self.angle_default
+			self.angle_car = self.angle_default
+			self.publisher([0, self.acc_car, self.angle_car, self.FB_gui])#[RC car, acc_car, angle_car, backward]
 			self.ST_gui == 1
 
 	def call_up_rl(self, e): #Stop servo for front wheels
@@ -115,7 +123,7 @@ class GUI_Car():
 		print("ST")
 		self.angle_car = 0
 		angle_for_training = 0
-		node.publisher([0, self.acc_car, self.angle_car, self.FB_gui])
+		self.publisher([0, self.acc_car, self.angle_car, self.FB_gui])
 		self.DS_gui = 0
 
 	def loop(self):
@@ -123,7 +131,7 @@ class GUI_Car():
 
 		self.label_pwm_vel_gui = Label(text="Velocidad (PWM):")
 		self.label_pwm_vel_gui.place(x = 450, y = 30, width=130)
-		self.pwm_vel_gui = Spinbox(root, from_= 70, to = 100, increment = 10)
+		self.pwm_vel_gui = Spinbox(root, from_= 60, to = 100, increment = 10)
 		#pwm_vel_gui.place_configure(x = 450,y = 150, width = 70)
 		self.pwm_vel_gui.pack(pady = 50)	
 
@@ -155,6 +163,9 @@ class GUI_Car():
 		root.bind('<KeyPress-Left>', self.call_left)
 		root.bind('<KeyRelease-Left>', self.call_up_rl)
 
+		self.lblVideo = Label(root)
+		self.lblVideo.place(x = 255, y = 150)
+
 		root.mainloop()
 
 
@@ -167,17 +178,9 @@ pwm_vel = 0
 angle_for_training = 0
 acc_for_training = 0
 num_frame = 0
-num_video = 3#Cambiar por cada prueba de entrenamiento -------------------------------------------------------
-def init_node():
-	global node
-	rospy.init_node("GUI_car")
-    #rospy.spin()
-	node = Car()
-
-    
+num_video = 3 #Cambiar por cada prueba de entrenamiento -------------------------------------------------------    
 
 if __name__ == '__main__':
-	init_node()
 	root_aux = GUI_Car()
 	root_aux.loop()
 

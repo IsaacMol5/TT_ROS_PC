@@ -21,7 +21,7 @@ from utils.general import apply_classifier, check_img_size, check_imshow, check_
 from utils.plots import Annotator, colors
 from utils.torch_utils import load_classifier, select_device, time_sync
 
-
+limit = 0
 ros_image = 0
 
 def letterbox(img, new_shape=(640, 640), color=(114, 114, 114), auto=True, scaleFill=False, scaleup=True):
@@ -147,11 +147,11 @@ def detect(img):
         print(f'{s}Done. ({t3 - t2:.3f}s)')
         signals_detected = set(signals_detected)
         publish_classes(signals_detected)
-        publish_image(im0)
         # Stream results
-        #im0 = annotator.result()
-        #cv2.imshow("YoloV5_ROS", im0)
-        #cv2.waitKey(1)  # 1 millisecond
+        im0 = annotator.result()
+        cv2.imshow("YoloV5_ROS", im0)
+        cv2.waitKey(1)  # 1 millisecond
+        publish_image(im0)
     #height, width = im0.shape[:2]
     #print((height, width))
     #print("Classes: "+ str(signals_detected))
@@ -173,14 +173,21 @@ def publish_classes(classes):
     classes_pub.publish(classes)
 
 def image_callback(image):
-    global ros_image
-    ros_image = np.frombuffer(image.data, dtype=np.uint8).reshape(image.height, image.width, -1)
-    #ros_image = cv2.cvtColor(ros_image, cv2.COLOR_BGR2RGB)
-    #ros_image = cv2.imdecode(np.frombuffer(image.data, np.uint8), cv2.IMREAD_COLOR)
-    ros_image = cv2.resize(ros_image, dsize=(640, 480))
-    # Print results
-    with torch.no_grad():
-        detect(ros_image)
+    global ros_image, limit
+    if(True):
+        #ros_image = np.frombuffer(image.data, dtype=np.uint8).reshape(image.height, image.width, -1)
+        np_arr = np.fromstring(image.data, np.uint8)
+        ros_image = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+        #ros_image = cv2.cvtColor(ros_image, cv2.COLOR_BGR2RGB)
+        #ros_image = cv2.imdecode(np.frombuffer(image.data, np.uint8), cv2.IMREAD_COLOR)
+        #ros_image = cv2.resize(ros_image, dsize=(640, 480))
+        # Print results
+        print("Hace algo")
+        with torch.no_grad():
+            limit = 0
+            detect(ros_image)
+    else:
+        limit = limit + 1
 
 if __name__ == '__main__':
     set_logging()
@@ -195,8 +202,8 @@ if __name__ == '__main__':
   
     rospy.init_node('ros_yolo_sf')
     image_topic= "/usb_cam/image_raw"
-    image_topic_1 = "/fisheye_correction/image"
-    rospy.Subscriber(image_topic_1, Image, image_callback, queue_size=1, buff_size=52428800)
+    image_topic_1 = "/fisheye_correction/image/compressed"
+    rospy.Subscriber(image_topic_1, CompressedImage, image_callback, queue_size=1, buff_size=52428800)
     image_pub = rospy.Publisher('/ros_yolo_sf/image', CompressedImage, queue_size=1)
     classes_pub = rospy.Publisher('/ros_yolo_sf/traffic_signals', String, queue_size=1)
     #rospy.init_node("yolo_result_out_node", anonymous=True)

@@ -10,9 +10,9 @@ import time
 
 
 class SelfDriving_Car():
-    angle = 0
+    last_acc = 0
     acc = 90
-    dist_ultrasonic = 0.0
+    dist_ultrasonic = 30.0
     traffic_signals = ""
     stop_signal = False
     green_traffic_light = False
@@ -34,38 +34,35 @@ class SelfDriving_Car():
     dangerous_curve_left_P = False
     person = False
     cars = False
+    on_callback_traffic_signals = True
+    on_callback_ultrasonic_sensor = True
 
     def __init__(self):
-        #rospy.Subscriber('/control_angle_cnn', Int8, self.callback_angle_cnn)  
-        #rospy.Subscriber('/ros_yolo_sf/traffic_signals', String, self.callback_traffic_signals)  
+        self.commands_sf = rospy.Publisher('/sf_acc_control_picar/acc_command', Int8MultiArray, queue_size = 2)
+        self.my_msg = Int8MultiArray()
+        time.sleep(2)  
+        #self.publisher(self.acc)
+        rospy.Subscriber('/ros_yolo_sf/traffic_signals', String, self.callback_traffic_signals)  
         #rospy.Subscriber('/sonar_dist', Float32, self.callback_ultrasonic_sensor) 
-        self.commands = rospy.Publisher('/sf_control_picar', Int8MultiArray, queue_size = 2)
-        self.my_msg = Int8MultiArray()  
-        self.publisher(self.acc, 35)
-
-    def callback_angle_cnn(self, data_angle):
-        aux_angle = int(data_angle.data)
-        if (self.angle != aux_angle):
-            self.angle = aux_angle
-            self.rules()
-        
 
     def callback_traffic_signals(self, signals_detected):
         aux_traffic_signals = str(signals_detected.data)
-        if(self.traffic_signals != aux_traffic_signals):
+        if(self.traffic_signals != aux_traffic_signals and self.on_callback_traffic_signals == True):
             self.traffic_signals = aux_traffic_signals
+            self.get_traffic_signals()
             self.rules()
     
-    def callback_ultrasonic_sensor(self, data_angle):
-        aux_dist_ultrasonic = data_angle.data
-        if(self.dist_ultrasonic != aux_dist_ultrasonic):
+    def callback_ultrasonic_sensor(self, distance):
+        aux_dist_ultrasonic = distance.data
+        if(self.dist_ultrasonic != aux_dist_ultrasonic and self.on_callback_ultrasonic_sensor == True):
             self.dist_ultrasonic = aux_dist_ultrasonic
             self.rules()
 
     def calulate_pwm(self, speed_limit):
         pwm = int(((30/100)*speed_limit)+70)
-        if(pwm < 70):
+        if(pwm < 60):
             pwm = 0
+            print("Need for speed :)")
         return pwm
 
     def get_traffic_signals(self):
@@ -173,41 +170,67 @@ class SelfDriving_Car():
 
     def rules(self):
         print("Conduction Rules")
-        self.get_traffic_signals()
         if(self.dist_ultrasonic < 20.0):
             if (self.cars):
-                self.publisher(0, 0)
+                self.publisher(0)
         elif(self.person):
-            self.publisher(0, 0)
+            self.publisher(0)
         elif(self.stop_signal):
-            self.publisher(0, 0)
+            self.last_acc = self.acc
+            self.on_callback_traffic_signals = False
+            self.on_callback_ultrasonic_sensor = False
+            self.publisher(0)
+            time.sleep(3)
+            self.acc = self.last_acc
+            self.publisher(self.acc)
+            self.on_callback_ultrasonic_sensor = True
+            time.sleep(1.5)
+            self.on_callback_traffic_signals = True
         elif(self.no_right_turn_sign):
-            self.publisher(0, -35)
+            self.publisher(0)
         elif(self.no_left_turn_sign):
-            self.publisher(0, 35)
+            self.publisher(0)
         elif(self.red_traffic_light):
-            self.publisher(0, 0)
+            self.last_acc = self.acc
+            self.on_callback_traffic_signals = False
+            self.on_callback_ultrasonic_sensor = False
+            self.publisher(0)
         elif(self.yellow_traffic_light):
-            self.publisher(85, self.angle)
+            self.last_acc = self.acc
+            if(self.acc - 10 >= 60):
+                self.acc = self.acc -10
+                self.publisher(self.acc)
+            else:
+                self.acc = 70
+                self.publisher(self.acc)
         elif(self.green_traffic_light):
-            self.publisher(self.acc, angle)
+            self.acc = self.last_acc
+            self.publisher(self.acc)
+        elif(self.speed_limit_100):
+            self.acc = self.calulate_pwm(100)
+            self.last_acc = self.calulate_pwm(100)
+            self.publisher(self.acc)
+        elif(self.speed_limit_50):
+            self.acc = self.calulate_pwm(50)
+            self.last_acc = self.calulate_pwm(50)
+            self.publisher(self.acc)
         else:
-            self.publisher(self.acc, angle)
+            self.publisher(self.acc)
         
 
-    def publisher(self, acc, angle):
-        print("Hay msg")
-        self.my_msg.data = [1, int(acc), int(angle)]
+    def publisher(self, acc):
+        self.my_msg.data = [1, acc]
         print(self.my_msg.data)
-        self.commands.publish(self.my_msg)
+        self.commands_sf.publish(self.my_msg)
     
 
 def init_node():
-    rospy.init_node("ros_rules_angle_acc")
+    rospy.init_node("ros_rules_acc")
     ri = SelfDriving_Car()
     rate = rospy.Rate(1)
     while not rospy.is_shutdown():
         rate.sleep()
+        
 
 if __name__ == "__main__":
     init_node()
