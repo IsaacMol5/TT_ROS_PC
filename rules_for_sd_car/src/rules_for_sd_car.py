@@ -4,6 +4,7 @@ from std_msgs.msg import Int8
 from std_msgs.msg import Int8MultiArray
 from std_msgs.msg import Float32
 from std_msgs.msg import String
+from std_msgs.msg import Bool
 import numpy as np
 import cv2
 import time
@@ -36,18 +37,21 @@ class SelfDriving_Car():
     cars = False
     on_callback_traffic_signals = True
     on_callback_ultrasonic_sensor = True
+    flag_red = False
+    enabled_node = False
 
     def __init__(self):
         self.commands_sf = rospy.Publisher('/sf_acc_control_picar/acc_command', Int8MultiArray, queue_size = 2)
         self.my_msg = Int8MultiArray()
         time.sleep(2)  
-        #self.publisher(self.acc)
+        self.publisher(self.acc)
         rospy.Subscriber('/ros_yolo_sf/traffic_signals', String, self.callback_traffic_signals)  
         #rospy.Subscriber('/sonar_dist', Float32, self.callback_ultrasonic_sensor) 
+        rospy.Subscriber('/gui/activation', Bool, self.callback_enabled_node)
 
     def callback_traffic_signals(self, signals_detected):
         aux_traffic_signals = str(signals_detected.data)
-        if(self.traffic_signals != aux_traffic_signals and self.on_callback_traffic_signals == True):
+        if(self.traffic_signals != aux_traffic_signals and self.on_callback_traffic_signals == True and self.enabled_node == True):
             self.traffic_signals = aux_traffic_signals
             self.get_traffic_signals()
             self.rules()
@@ -57,6 +61,9 @@ class SelfDriving_Car():
         if(self.dist_ultrasonic != aux_dist_ultrasonic and self.on_callback_ultrasonic_sensor == True):
             self.dist_ultrasonic = aux_dist_ultrasonic
             self.rules()
+
+    def callback_enabled_node(self, data):
+        self.enabled_node = data.data
 
     def calulate_pwm(self, speed_limit):
         pwm = int(((30/100)*speed_limit)+70)
@@ -194,7 +201,11 @@ class SelfDriving_Car():
             self.last_acc = self.acc
             self.on_callback_traffic_signals = False
             self.on_callback_ultrasonic_sensor = False
+            self.flag_red = True
             self.publisher(0)
+            time.sleep(1.5)
+            self.on_callback_traffic_signals = True
+            self.on_callback_ultrasonic_sensor = True
         elif(self.yellow_traffic_light):
             self.last_acc = self.acc
             if(self.acc - 10 >= 60):
@@ -204,18 +215,28 @@ class SelfDriving_Car():
                 self.acc = 70
                 self.publisher(self.acc)
         elif(self.green_traffic_light):
+            self.flag_red
             self.acc = self.last_acc
             self.publisher(self.acc)
         elif(self.speed_limit_100):
             self.acc = self.calulate_pwm(100)
             self.last_acc = self.calulate_pwm(100)
             self.publisher(self.acc)
+        elif(self.speed_limit_70):
+            self.acc = self.calulate_pwm(70)
+            self.last_acc = self.calulate_pwm(70)
+            self.publisher(self.acc)
         elif(self.speed_limit_50):
             self.acc = self.calulate_pwm(50)
             self.last_acc = self.calulate_pwm(50)
             self.publisher(self.acc)
-        else:
+        elif(self.speed_limit_20):
+            self.acc = self.calulate_pwm(20)
+            self.last_acc = self.calulate_pwm(20)
             self.publisher(self.acc)
+        else:
+            if(self.flag_red == False):
+                self.publisher(self.acc)
         
 
     def publisher(self, acc):

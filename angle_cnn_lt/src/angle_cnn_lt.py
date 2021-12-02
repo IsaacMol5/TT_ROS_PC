@@ -4,6 +4,7 @@ from tensorflow.keras.models import load_model
 import rospy
 from sensor_msgs.msg import CompressedImage
 from std_msgs.msg import Int8MultiArray
+from std_msgs.msg import Bool
 import numpy as np
 import cv2
 import time
@@ -11,6 +12,15 @@ import time
 class Angle_Acc_CNN():
     angle_acc_cnn = '/home/isaac/pesos_redes/steer.h5'
     angle_cnn = '/home/isaac/pesos_redes/lane_navigation.h5'
+    enabled_node = False
+
+    def __init__(self):
+        self.session = tf.compat.v1.keras.backend.get_session()
+        self.model = load_model(self.angle_cnn, compile=False)
+        rospy.Subscriber('/fisheye_correction/image/compressed', CompressedImage, self.callback)  
+        rospy.Subscriber('/gui/activation', Bool, self.callback_enabled_node)
+        self.pub = rospy.Publisher('/sf_angle_control_picar/angle_command', Int8MultiArray, queue_size = 2)
+        self.my_msg = Int8MultiArray()  
 
     def img_preprocess(self, image):
         height, _, _ = image.shape
@@ -21,26 +31,25 @@ class Angle_Acc_CNN():
         image = image / 255 # normalizing
         return image
 
-    def __init__(self):
-        self.session = tf.compat.v1.keras.backend.get_session()
-        self.model = load_model(self.angle_cnn, compile=False)
-        rospy.Subscriber('/fisheye_correction/image/compressed', CompressedImage, self.callback)  
-        self.pub = rospy.Publisher('/sf_angle_control_picar/angle_command', Int8MultiArray, queue_size = 2)
-        self.my_msg = Int8MultiArray()  
-
     def callback(self, data):
-        np_arr = np.fromstring(data.data, np.uint8)
-        image_np = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
-        preprocessed = self.img_preprocess(image_np)
-        X = np.asarray([preprocessed])
-        with self.session.graph.as_default():
-            tf.compat.v1.keras.backend.set_session(self.session)
-            steering_angle_predict = self.model.predict(X)[0]
-            print(steering_angle_predict)
-            #time.sleep(0.4)
-            self.publisher(steering_angle_predict)
+        if(self.enabled_node):
+            np_arr = np.fromstring(data.data, np.uint8)
+            image_np = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+            preprocessed = self.img_preprocess(image_np)
+            X = np.asarray([preprocessed])
+            with self.session.graph.as_default():
+                tf.compat.v1.keras.backend.set_session(self.session)
+                steering_angle_predict = self.model.predict(X)[0]
+                print(steering_angle_predict)
+                #time.sleep(0.4)
+                self.publisher(steering_angle_predict)
+    
+    def callback_enabled_node(self, data):
+        self.enabled_node = data.data
         
     def publisher(self, steering_angle_predict):
+        self.my_msg.data = [1, 80]
+        self.pub.publish(self.my_msg)
         self.my_msg.data = [2, int(steering_angle_predict[0])]
         self.pub.publish(self.my_msg)
 

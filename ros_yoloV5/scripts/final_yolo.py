@@ -149,8 +149,8 @@ def detect(img):
         publish_classes(signals_detected)
         # Stream results
         im0 = annotator.result()
-        cv2.imshow("YoloV5_ROS", im0)
-        cv2.waitKey(1)  # 1 millisecond
+        #cv2.imshow("YoloV5_ROS", im0)
+        #cv2.waitKey(1)  # 1 millisecond
         publish_image(im0)
     #height, width = im0.shape[:2]
     #print((height, width))
@@ -174,7 +174,7 @@ def publish_classes(classes):
 
 def image_callback(image):
     global ros_image, limit
-    if(True):
+    if(limit > 2):
         #ros_image = np.frombuffer(image.data, dtype=np.uint8).reshape(image.height, image.width, -1)
         np_arr = np.fromstring(image.data, np.uint8)
         ros_image = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
