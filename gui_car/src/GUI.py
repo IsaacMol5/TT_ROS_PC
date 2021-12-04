@@ -37,6 +37,7 @@ class GUI_Car():
 	def __init__(self):
 		rospy.init_node("GUI_car")
 		rospy.Subscriber('/fisheye_correction/image/compressed', CompressedImage, self.callback)  
+		rospy.Subscriber('/ros_yolo_sf/image', CompressedImage, self.detection_callback) 
 		self.comm = rospy.Publisher('/car/commands', Int8MultiArray, queue_size = 2)
 		self.comm_enabled_sd = rospy.Publisher('/gui/activation',Bool , queue_size = 2)
 		self.my_msg = Int8MultiArray()
@@ -68,6 +69,17 @@ class GUI_Car():
 		self.lblVideo.image = img
         #print("Llego un frame")
 		num_frame = num_frame + 1
+
+	def detection_callback(self, data):
+		np_arr = np.fromstring(data.data, np.uint8)
+		image_dec = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+		image_dec = cv2.cvtColor(image_dec, cv2.COLOR_BGR2RGB)
+		image_dec = cv2.resize(image_dec, (320, 240))
+		im = Img.fromarray(image_dec)
+		img = ImageTk.PhotoImage(image=im)
+		self.lblDeteccion.configure(image=img)
+		self.lblDeteccion.image = img
+        #print("Llego un frame")
 
 	def publisher(self, commands):
 		self.my_msg.data = [commands[0], commands[1], commands[2], commands[3]]

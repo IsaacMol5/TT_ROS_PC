@@ -4,6 +4,7 @@ import roslib
 import rospy
 from std_msgs.msg import Header
 from std_msgs.msg import String
+from std_msgs.msg import Bool
 from sensor_msgs.msg import Image
 from sensor_msgs.msg import CompressedImage
 from pathlib import Path
@@ -23,6 +24,7 @@ from utils.torch_utils import load_classifier, select_device, time_sync
 
 limit = 0
 ros_image = 0
+enabled_node = False
 
 def letterbox(img, new_shape=(640, 640), color=(114, 114, 114), auto=True, scaleFill=False, scaleup=True):
     # Resize image to a 32-pixel-multiple rectangle https://github.com/ultralytics/yolov3/issues/232
@@ -173,8 +175,8 @@ def publish_classes(classes):
     classes_pub.publish(classes)
 
 def image_callback(image):
-    global ros_image, limit
-    if(limit > 2):
+    global ros_image, limit, enabled_node
+    if(limit > 1 and enabled_node):
         #ros_image = np.frombuffer(image.data, dtype=np.uint8).reshape(image.height, image.width, -1)
         np_arr = np.fromstring(image.data, np.uint8)
         ros_image = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
@@ -188,6 +190,9 @@ def image_callback(image):
             detect(ros_image)
     else:
         limit = limit + 1
+def callback_enabled_node(data):
+    global enabled_node
+    enabled_node = data.data
 
 if __name__ == '__main__':
     set_logging()
@@ -204,6 +209,7 @@ if __name__ == '__main__':
     image_topic= "/usb_cam/image_raw"
     image_topic_1 = "/fisheye_correction/image/compressed"
     rospy.Subscriber(image_topic_1, CompressedImage, image_callback, queue_size=1, buff_size=52428800)
+    rospy.Subscriber('/gui/activation', Bool, callback_enabled_node)
     image_pub = rospy.Publisher('/ros_yolo_sf/image', CompressedImage, queue_size=1)
     classes_pub = rospy.Publisher('/ros_yolo_sf/traffic_signals', String, queue_size=1)
     #rospy.init_node("yolo_result_out_node", anonymous=True)

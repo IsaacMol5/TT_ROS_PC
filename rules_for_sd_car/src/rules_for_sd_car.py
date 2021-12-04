@@ -12,7 +12,7 @@ import time
 
 class SelfDriving_Car():
     last_acc = 0
-    acc = 90
+    acc = 60
     dist_ultrasonic = 30.0
     traffic_signals = ""
     stop_signal = False
@@ -44,14 +44,14 @@ class SelfDriving_Car():
         self.commands_sf = rospy.Publisher('/sf_acc_control_picar/acc_command', Int8MultiArray, queue_size = 2)
         self.my_msg = Int8MultiArray()
         time.sleep(2)  
-        self.publisher(self.acc)
+        #self.publisher(self.acc)
         rospy.Subscriber('/ros_yolo_sf/traffic_signals', String, self.callback_traffic_signals)  
         #rospy.Subscriber('/sonar_dist', Float32, self.callback_ultrasonic_sensor) 
         rospy.Subscriber('/gui/activation', Bool, self.callback_enabled_node)
 
     def callback_traffic_signals(self, signals_detected):
         aux_traffic_signals = str(signals_detected.data)
-        if(self.traffic_signals != aux_traffic_signals and self.on_callback_traffic_signals == True and self.enabled_node == True):
+        if(self.traffic_signals != aux_traffic_signals and self.on_callback_traffic_signals and self.enabled_node):
             self.traffic_signals = aux_traffic_signals
             self.get_traffic_signals()
             self.rules()
@@ -64,6 +64,11 @@ class SelfDriving_Car():
 
     def callback_enabled_node(self, data):
         self.enabled_node = data.data
+        if(self.enabled_node):
+            self.publisher(80)
+        else:
+            self.publisher(0)
+
 
     def calulate_pwm(self, speed_limit):
         pwm = int(((30/100)*speed_limit)+70)

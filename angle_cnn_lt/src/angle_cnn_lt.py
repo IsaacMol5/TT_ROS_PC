@@ -48,8 +48,8 @@ class Angle_Acc_CNN():
         self.enabled_node = data.data
         
     def publisher(self, steering_angle_predict):
-        self.my_msg.data = [1, 80]
-        self.pub.publish(self.my_msg)
+        self.my_msg.data = [1, 60]
+        #self.pub.publish(self.my_msg)
         self.my_msg.data = [2, int(steering_angle_predict[0])]
         self.pub.publish(self.my_msg)
 

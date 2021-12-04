@@ -1,9 +1,9 @@
-#!/usr/bin/env python2.7
+#!/usr/bin/env python3
 import rospy
 import numpy as np
 import pandas as pd
 import cv2 
-from cv_bridge import CvBridge, CvBridgeError
+#from cv_bridge import CvBridge, CvBridgeError
 import os
 import pickle
 from sensor_msgs.msg import CompressedImage
@@ -17,7 +17,7 @@ class Fisheye():
     def __init__(self):
         rospy.Subscriber('/raspicam_node/image/compressed', CompressedImage, self.callback)  
         self.pub_CompressedImage = rospy.Publisher('/fisheye_correction/image/compressed', CompressedImage, queue_size = 2)
-        self.pub_Image = rospy.Publisher('/fisheye_correction/image', Image, queue_size = 2)
+        #self.pub_Image = rospy.Publisher('/fisheye_correction/image', Image, queue_size = 2)
         #self.my_msg = Image()  
 
     def undistort(self, img, balance=0.0, dim2=None, dim3=None):
@@ -54,8 +54,8 @@ class Fisheye():
         image_compressed.format = "jpeg"
         image_compressed.data = np.array(cv2.imencode('.jpg', img_undistorsion)[1]).tostring()
         self.pub_CompressedImage.publish(image_compressed)
-        image = CvBridge().cv2_to_imgmsg(img_undistorsion, encoding="bgr8")
-        self.pub_Image.publish(image)
+        #image = CvBridge().cv2_to_imgmsg(img_undistorsion, encoding="bgr8")
+        #self.pub_Image.publish(image)
 
 
 def main():
