@@ -1,224 +1,47 @@
 #!/usr/bin/env python3
 import rospy
+import math
 import numpy as np
 import pandas as pd
 import cv2 
-from cv_bridge import CvBridge, CvBridgeError
 import os
 import pickle
+import time
 from sensor_msgs.msg import CompressedImage
-from sensor_msgs.msg import Image
+from std_msgs.msg import Bool
 
 class LaneLines():
+    enabled_selfdriving = True
+
     def __init__(self):
         rospy.Subscriber('/fisheye_correction/image/compressed', CompressedImage, self.callback)  
         self.pub_CompressedImage = rospy.Publisher('/lane_lines/image/compressed', CompressedImage, queue_size = 2)
-        #self.my_msg = Image()  
+        self.pub_Enabled_SD = rospy.Publisher('/lane_lines/enabled_sd', Bool, queue_size = 2)
     
-    def pipeline(self, img, s_thresh=(100, 255), sx_thresh=(15, 255)):
-        # Convert to HLS color space and separate the V channel
-        hls = cv2.cvtColor(img, cv2.COLOR_RGB2HLS).astype(np.float)
-        l_channel = hls[:,:,1]
-        s_channel = hls[:,:,2]
-        h_channel = hls[:,:,0]
-        # Sobel x
-        sobelx = cv2.Sobel(l_channel, cv2.CV_64F, 1, 1) # Take the derivative in x
-        abs_sobelx = np.absolute(sobelx) # Absolute x derivative to accentuate lines away from horizontal
-        scaled_sobel = np.uint8(255*abs_sobelx/np.max(abs_sobelx))
-        
-        # Threshold x gradient
-        sxbinary = np.zeros_like(scaled_sobel)
-        sxbinary[(scaled_sobel >= sx_thresh[0]) & (scaled_sobel <= sx_thresh[1])] = 1
-        
-        # Threshold color channel
-        s_binary = np.zeros_like(s_channel)
-        s_binary[(s_channel >= s_thresh[0]) & (s_channel <= s_thresh[1])] = 1
-        
-        color_binary = np.dstack((np.zeros_like(sxbinary), sxbinary, s_binary)) * 255
-        
-        combined_binary = np.zeros_like(sxbinary)
-        combined_binary[(s_binary == 1) | (sxbinary == 1)] = 1
-        return combined_binary
-
-    def perspective_warp(self, img, 
-                     dst_size=(1280,960),
-                     src=np.float32([[(0.1,0.49),(0.9,0.5),(0, 1),(1,1)]]),
-                     dst=np.float32([(0,0), (1, 0), (0,1), (1,1)])):
-        img_size = np.float32([(img.shape[1],img.shape[0])])
-        src = src* img_size
-        # For destination points, I'm arbitrarily choosing some points to be
-        # a nice fit for displaying our warped result 
-        # again, not exact, but close enough for our purposes
-        dst = dst * np.float32(dst_size)
-        # Given src and dst points, calculate the perspective transform matrix
-        M = cv2.getPerspectiveTransform(src, dst)
-        # Warp the image using OpenCV warpPerspective()
-        warped = cv2.warpPerspective(img, M, dst_size)
-        return warped
-
-    def inv_perspective_warp(self, img, 
-                     dst_size=(1280,960),
-                     src=np.float32([(0,0), (1, 0), (0,1), (1,1)]),
-                     dst=np.float32([(0.1,0.49),(0.9,0.5),(0, 1),(1,1)])):
-        img_size = np.float32([(img.shape[1],img.shape[0])])
-        src = src* img_size
-        # For destination points, I'm arbitrarily choosing some points to be
-        # a nice fit for displaying our warped result 
-        # again, not exact, but close enough for our purposes
-        dst = dst * np.float32(dst_size)
-        # Given src and dst points, calculate the perspective transform matrix
-        M = cv2.getPerspectiveTransform(src, dst)
-        # Warp the image using OpenCV warpPerspective()
-        warped = cv2.warpPerspective(img, M, dst_size)
-        return warped
-
-    def get_hist(self, img):
-        hist = np.sum(img[img.shape[0]//2:,:], axis=0)
-        return hist
-
-
-    def sliding_window(self, img, nwindows=9, margin=150, minpix = 1, draw_windows=True):
-        global left_a, left_b, left_c,right_a, right_b, right_c 
-        left_fit_= np.empty(3)
-        right_fit_ = np.empty(3)
-        out_img = np.dstack((img, img, img))*255
-
-        histogram = self.get_hist(img)
-        # find peaks of left and right halves
-        midpoint = int(histogram.shape[0]/2)
-        leftx_base = np.argmax(histogram[:midpoint])
-        rightx_base = np.argmax(histogram[midpoint:]) + midpoint
-        
-        
-        # Set height of windows
-        window_height = np.int(img.shape[0]/nwindows)
-        # Identify the x and y positions of all nonzero pixels in the image
-        nonzero = img.nonzero()
-        nonzeroy = np.array(nonzero[0])
-        nonzerox = np.array(nonzero[1])
-        # Current positions to be updated for each window
-        leftx_current = leftx_base
-        rightx_current = rightx_base
-        
-        
-        # Create empty lists to receive left and right lane pixel indices
-        left_lane_inds = []
-        right_lane_inds = []
-
-        # Step through the windows one by one
-        for window in range(nwindows):
-            # Identify window boundaries in x and y (and right and left)
-            win_y_low = img.shape[0] - (window+1)*window_height
-            win_y_high = img.shape[0] - window*window_height
-            win_xleft_low = leftx_current - margin
-            win_xleft_high = leftx_current + margin
-            win_xright_low = rightx_current - margin
-            win_xright_high = rightx_current + margin
-            # Draw the windows on the visualization image
-            if draw_windows == True:
-                cv2.rectangle(out_img,(win_xleft_low,win_y_low),(win_xleft_high,win_y_high),
-                (100,255,255), 3) 
-                cv2.rectangle(out_img,(win_xright_low,win_y_low),(win_xright_high,win_y_high),
-                (100,255,255), 3) 
-            # Identify the nonzero pixels in x and y within the window
-            good_left_inds = ((nonzeroy >= win_y_low) & (nonzeroy < win_y_high) & 
-            (nonzerox >= win_xleft_low) &  (nonzerox < win_xleft_high)).nonzero()[0]
-            good_right_inds = ((nonzeroy >= win_y_low) & (nonzeroy < win_y_high) & 
-            (nonzerox >= win_xright_low) &  (nonzerox < win_xright_high)).nonzero()[0]
-            # Append these indices to the lists
-            left_lane_inds.append(good_left_inds)
-            right_lane_inds.append(good_right_inds)
-            # If you found > minpix pixels, recenter next window on their mean position
-            if len(good_left_inds) > minpix:
-                leftx_current = np.int(np.mean(nonzerox[good_left_inds]))
-            if len(good_right_inds) > minpix:        
-                rightx_current = np.int(np.mean(nonzerox[good_right_inds]))
-
-
-        # Concatenate the arrays of indices
-        left_lane_inds = np.concatenate(left_lane_inds)
-        right_lane_inds = np.concatenate(right_lane_inds)
-
-        # Extract left and right line pixel positions
-        leftx = nonzerox[left_lane_inds]
-        lefty = nonzeroy[left_lane_inds] 
-        rightx = nonzerox[right_lane_inds]
-        righty = nonzeroy[right_lane_inds] 
-
-        # Fit a second order polynomial to each
-        left_fit = np.polyfit(lefty, leftx, 2)
-        right_fit = np.polyfit(righty, rightx, 2)
-        
-        left_a.append(left_fit[0])
-        left_b.append(left_fit[1])
-        left_c.append(left_fit[2])
-        
-        right_a.append(right_fit[0])
-        right_b.append(right_fit[1])
-        right_c.append(right_fit[2])
-        
-        left_fit_[0] = np.mean(left_a[-10:])
-        left_fit_[1] = np.mean(left_b[-10:])
-        left_fit_[2] = np.mean(left_c[-10:])
-        
-        right_fit_[0] = np.mean(right_a[-10:])
-        right_fit_[1] = np.mean(right_b[-10:])
-        right_fit_[2] = np.mean(right_c[-10:])
-        
-        # Generate x and y values for plotting
-        ploty = np.linspace(0, img.shape[0]-1, img.shape[0] )
-        left_fitx = left_fit_[0]*ploty**2 + left_fit_[1]*ploty + left_fit_[2]
-        right_fitx = right_fit_[0]*ploty**2 + right_fit_[1]*ploty + right_fit_[2]
-
-        out_img[nonzeroy[left_lane_inds], nonzerox[left_lane_inds]] = [255, 0, 100]
-        out_img[nonzeroy[right_lane_inds], nonzerox[right_lane_inds]] = [0, 100, 255]
-        
-        return out_img, (left_fitx, right_fitx), (left_fit_, right_fit_), ploty
-
-    def get_curve(self, img, leftx, rightx):
-        ploty = np.linspace(0, img.shape[0]-1, img.shape[0])
-        y_eval = np.max(ploty)
-        ym_per_pix = 30.5/2592 # meters per pixel in y dimension
-        xm_per_pix = 3.7/2592 # meters per pixel in x dimension
-
-        # Fit new polynomials to x,y in world space
-        left_fit_cr = np.polyfit(ploty*ym_per_pix, leftx*xm_per_pix, 2)
-        right_fit_cr = np.polyfit(ploty*ym_per_pix, rightx*xm_per_pix, 2)
-        # Calculate the new radii of curvature
-        left_curverad = ((1 + (2*left_fit_cr[0]*y_eval*ym_per_pix + left_fit_cr[1])**2)**1.5) / np.absolute(2*left_fit_cr[0])
-        right_curverad = ((1 + (2*right_fit_cr[0]*y_eval*ym_per_pix + right_fit_cr[1])**2)**1.5) / np.absolute(2*right_fit_cr[0])
-
-        car_pos = img.shape[1]/2
-        l_fit_x_int = left_fit_cr[0]*img.shape[0]**2 + left_fit_cr[1]*img.shape[0] + left_fit_cr[2]
-        r_fit_x_int = right_fit_cr[0]*img.shape[0]**2 + right_fit_cr[1]*img.shape[0] + right_fit_cr[2]
-        lane_center_position = (r_fit_x_int + l_fit_x_int) /2
-        center = (car_pos - lane_center_position) * xm_per_pix / 10
-        # Now our radius of curvature is in meters
-        return (left_curverad, right_curverad, center)
-
-    def draw_lanes(self, img, left_fit, right_fit):
-        ploty = np.linspace(0, img.shape[0]-1, img.shape[0])
-        color_img = np.zeros_like(img)
-        
-        left = np.array([np.transpose(np.vstack([left_fit, ploty]))])
-        right = np.array([np.flipud(np.transpose(np.vstack([right_fit, ploty])))])
-        points = np.hstack((left, right))
-        
-        cv2.fillPoly(color_img, np.int_(points), (0,200,255))
-        inv_perspective = self.inv_perspective_warp(color_img)
-        inv_perspective = cv2.addWeighted(img, 1, inv_perspective, 0.7, 0)
-        return inv_perspective
-
     def callback(self, data):
         np_arr = np.fromstring(data.data, np.uint8)
-        image_np = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
-        img = cv2.cvtColor(image_np, cv2.COLOR_BGR2RGB)
-        dst = self.pipeline(img)
-        dst = self.perspective_warp(dst, dst_size=(1280,960))
-        out_img, curves, lanes, ploty = self.sliding_window(dst)
-        curverad=self.get_curve(img, curves[0],curves[1])
-        img = self.draw_lanes(img, curves[0], curves[1])
-        self.publisher(img)
+        img = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+        #img = cv2.cvtColor(image_np, cv2.COLOR_BGR2RGB)
+        edges = self.detect_edges(img)
+        cropped_edges = self.region_of_interest(edges)
+        line_segments = self.detect_line_segments(cropped_edges)
+        #Put if
+        line_segment_image = self.display_lines(img, line_segments)
+        lane_lines = self.average_slope_intercept(img, line_segments)
+        if(lane_lines == []):
+            self.enabled_selfdriving = False
+            self.publisher_en_sd()
+        else:
+            self.enabled_selfdriving = True
+            lane_lines_image = self.display_lines(img, lane_lines)
+            self.publisher(lane_lines_image)
+
+    def publisher_en_sd(self):
+        time.sleep(0.3)
+        if(self.enabled_selfdriving == False):
+            msg = Bool()  
+            msg = False
+            self.pub_Enabled_SD.publish(msg)
     
     def publisher(self, img_lane_lines):
         image_compressed = CompressedImage()  
@@ -226,9 +49,130 @@ class LaneLines():
         image_compressed.format = "jpeg"
         image_compressed.data = np.array(cv2.imencode('.jpg', img_lane_lines)[1]).tostring()
         self.pub_CompressedImage.publish(image_compressed)
+    
+    def detect_edges(self, frame):
+        # filter for yellow lane lines
+        frame = cv2.GaussianBlur(frame,(5, 5), 0)
+        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+        lower_yellow = np.array([30, 60, 60])
+        upper_yellow = np.array([60, 255, 255])
+        mask = cv2.inRange(hsv, lower_yellow, upper_yellow)
+        # detect edges
+        edges = cv2.Canny(mask, 200, 400)
 
-left_a, left_b, left_c = [],[],[]
-right_a, right_b, right_c = [],[],[]
+        return edges
+
+    def region_of_interest(self, canny):
+        height, width = canny.shape
+        mask = np.zeros_like(canny)
+        # only focus bottom half of the screen
+        polygon = np.array([[
+            (0, height * 1 / 2),
+            (width, height * 1 / 2),
+            (width, height),
+            (0, height),
+        ]], np.int32)
+        cv2.fillPoly(mask, polygon, 255)
+        masked_image = cv2.bitwise_and(canny, mask)
+
+        return masked_image
+
+    def length_of_line_segment(self, line):
+        x1, y1, x2, y2 = line
+        return math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2)
+
+    def detect_line_segments(self, cropped_edges):
+        # tuning min_threshold, minLineLength, maxLineGap is a trial and error process by hand
+        rho = 1  # precision in pixel, i.e. 1 pixel
+        angle = np.pi / 180  # degree in radian, i.e. 1 degree
+        min_threshold = 10  # minimal of votes
+        line_segments = cv2.HoughLinesP(cropped_edges, rho, angle, min_threshold, np.array([]), minLineLength=8,
+                                        maxLineGap=4)
+
+        if line_segments is not None:
+            for line_segment in line_segments:
+                print('detected line_segment:')
+                print("%s of length %s" % (line_segment, self.length_of_line_segment(line_segment[0])))
+
+        return line_segments
+    
+    def display_lines(self, frame, lines, line_color=(255, 0, 0), line_width=10):
+        line_image = np.zeros_like(frame)
+        if lines is not None:
+            for line in lines:
+                for x1, y1, x2, y2 in line:
+                    cv2.line(line_image, (x1, y1), (x2, y2), line_color, line_width)
+        line_image = cv2.addWeighted(frame, 0.8, line_image, 1, 1)
+        return line_image
+
+    def make_points(self, frame, line):
+        height, width, _ = frame.shape
+        slope, intercept = line
+        y1 = height  # bottom of the frame
+        y2 = int(y1 * 1 / 2)  # make points from middle of the frame down
+
+        # bound the coordinates within the frame
+        x1 = max(-width, min(2 * width, int((y1 - intercept) / slope)))
+        x2 = max(-width, min(2 * width, int((y2 - intercept) / slope)))
+        return [[x1, y1, x2, y2]]
+
+    def average_slope_intercept(self, frame, line_segments):
+        """
+        This function combines line segments into one or two lane lines
+        If all line slopes are < 0: then we only have detected left lane
+        If all line slopes are > 0: then we only have detected right lane
+        """
+        lane_lines = []
+        if line_segments is None:
+            print('No line_segment segments detected')
+            return lane_lines
+
+        height, width, _ = frame.shape
+        left_fit = []
+        right_fit = []
+
+        boundary = 1/3
+        left_region_boundary = width * (1 - boundary)  # left lane line segment should be on left 2/3 of the screen
+        right_region_boundary = width * boundary # right lane line segment should be on left 2/3 of the screen
+
+        for line_segment in line_segments:
+            for x1, y1, x2, y2 in line_segment:
+                if x1 == x2:
+                    print('skipping vertical line segment (slope=inf): %s' % line_segment)
+                    continue
+                fit = np.polyfit((x1, x2), (y1, y2), 1)
+                slope = fit[0]
+                intercept = fit[1]
+                if slope < 0:
+                    if x1 < left_region_boundary and x2 < left_region_boundary:
+                        left_fit.append((slope, intercept))
+                else:
+                    if x1 > right_region_boundary and x2 > right_region_boundary:
+                        right_fit.append((slope, intercept))
+
+        left_fit_average = np.average(left_fit, axis=0)
+        if len(left_fit) > 0:
+            lane_lines.append(self.make_points(frame, left_fit_average))
+
+        right_fit_average = np.average(right_fit, axis=0)
+        if len(right_fit) > 0:
+            lane_lines.append(self.make_points(frame, right_fit_average))
+
+        print('lane lines: %s' % lane_lines)  # [[[316, 720, 484, 432]], [[1009, 720, 718, 432]]]
+
+        return lane_lines
+
+    def steer(lane_lines):
+            logging.debug('steering...')
+            if len(lane_lines) == 0:
+                print("No se detecta carril...")
+            elif len(lane_lines) == 1:
+                print("Tomando curva...")
+            elif len(lane_lines) == 2:
+                print("Linea recta")
+    
+    
+
 def main():
     rospy.init_node("lane_lines")
     #rospy.spin()

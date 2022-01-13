@@ -176,7 +176,8 @@ def publish_classes(classes):
 
 def image_callback(image):
     global ros_image, limit, enabled_node
-    if(limit > 1 and enabled_node):
+    #if(limit > 1 and enabled_node):
+    if(enabled_node):
         #ros_image = np.frombuffer(image.data, dtype=np.uint8).reshape(image.height, image.width, -1)
         np_arr = np.fromstring(image.data, np.uint8)
         ros_image = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)

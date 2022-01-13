@@ -11,8 +11,9 @@ import time
 
 
 class SelfDriving_Car():
-    last_acc = 0
-    acc = 60
+    def_acc = 50
+    last_acc = def_acc
+    acc = def_acc
     dist_ultrasonic = 30.0
     traffic_signals = ""
     stop_signal = False
@@ -46,7 +47,7 @@ class SelfDriving_Car():
         time.sleep(2)  
         #self.publisher(self.acc)
         rospy.Subscriber('/ros_yolo_sf/traffic_signals', String, self.callback_traffic_signals)  
-        #rospy.Subscriber('/sonar_dist', Float32, self.callback_ultrasonic_sensor) 
+        rospy.Subscriber('/sonar_dist', Float32, self.callback_ultrasonic_sensor) 
         rospy.Subscriber('/gui/activation', Bool, self.callback_enabled_node)
 
     def callback_traffic_signals(self, signals_detected):
@@ -58,21 +59,21 @@ class SelfDriving_Car():
     
     def callback_ultrasonic_sensor(self, distance):
         aux_dist_ultrasonic = distance.data
-        if(self.dist_ultrasonic != aux_dist_ultrasonic and self.on_callback_ultrasonic_sensor == True):
+        if(self.dist_ultrasonic != aux_dist_ultrasonic and self.on_callback_ultrasonic_sensor == True and self.enabled_node):
             self.dist_ultrasonic = aux_dist_ultrasonic
             self.rules()
 
     def callback_enabled_node(self, data):
         self.enabled_node = data.data
         if(self.enabled_node):
-            self.publisher(80)
+            self.publisher(self.last_acc)
         else:
             self.publisher(0)
 
 
     def calulate_pwm(self, speed_limit):
-        pwm = int(((30/100)*speed_limit)+70)
-        if(pwm < 60):
+        pwm = int(((25/100)*speed_limit)+50)
+        if(pwm < 50):
             pwm = 0
             print("Need for speed :)")
         return pwm
@@ -171,20 +172,25 @@ class SelfDriving_Car():
                 self.dangerous_curve_left_P = False
 
             if(traffic_sign == "Persona"):
-                self.dangerous_curve_right_P = True
+                self.person = True
             else:
-                self.dangerous_curve_right_P = False
+                self.person = False
 
             if(traffic_sign == "Carro"):
-                self.dangerous_curve_left_P = True
+                self.cars = True
             else:
-                self.dangerous_curve_left_P = False
+                self.cars = False
 
     def rules(self):
         print("Conduction Rules")
         if(self.dist_ultrasonic < 20.0):
             if (self.cars):
+                self.last_acc = self.acc
+                print("Hay un carro")
                 self.publisher(0)
+            #else:
+                #self.acc = self.last_acc
+                #self.publisher(acc)
         elif(self.person):
             self.publisher(0)
         elif(self.stop_signal):
@@ -220,9 +226,13 @@ class SelfDriving_Car():
                 self.acc = 70
                 self.publisher(self.acc)
         elif(self.green_traffic_light):
-            self.flag_red
-            self.acc = self.last_acc
-            self.publisher(self.acc)
+            if(self.last_acc >= 60):
+                self.flag_red == False
+                self.acc = self.last_acc
+                self.publisher(self.acc)
+            else:
+                self.flag_red == False
+                self.publisher(self.acc)
         elif(self.speed_limit_100):
             self.acc = self.calulate_pwm(100)
             self.last_acc = self.calulate_pwm(100)
@@ -241,6 +251,8 @@ class SelfDriving_Car():
             self.publisher(self.acc)
         else:
             if(self.flag_red == False):
+                print("Ninguna señal de tránsito u objeto detectado")
+                self.acc = self.last_acc
                 self.publisher(self.acc)
         
 

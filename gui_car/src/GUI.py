@@ -13,6 +13,7 @@ import time
 import os
 import threading, time 
 import tkinter as tk
+from tkinter import messagebox as MessageBox
 from tkinter import *
 
 os.system('xset r off')
@@ -38,6 +39,7 @@ class GUI_Car():
 		rospy.init_node("GUI_car")
 		rospy.Subscriber('/fisheye_correction/image/compressed', CompressedImage, self.callback)  
 		rospy.Subscriber('/ros_yolo_sf/image', CompressedImage, self.detection_callback) 
+		rospy.Subscriber('/lane_lines/enabled_sd', Bool, self.enabled_sd_callback)
 		self.comm = rospy.Publisher('/car/commands', Int8MultiArray, queue_size = 2)
 		self.comm_enabled_sd = rospy.Publisher('/gui/activation',Bool , queue_size = 2)
 		self.my_msg = Int8MultiArray()
@@ -61,6 +63,7 @@ class GUI_Car():
 		#frame = imutils.resize(frame, width=640)
 		#if(acc_for_training != 0):
 			#cv2.imwrite("/home/isaac/training_angle/"+"Video"+str(num_video)+"_"+str(num_frame)+"_"+str(angle_for_training)+"_"+str(acc_for_training)+".jpg",frame)
+			#num_frame = num_frame + 1
 		frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 		frame = cv2.resize(frame, (320, 240))
 		im = Img.fromarray(frame)
@@ -68,7 +71,6 @@ class GUI_Car():
 		self.lblVideo.configure(image=img)
 		self.lblVideo.image = img
         #print("Llego un frame")
-		num_frame = num_frame + 1
 
 	def detection_callback(self, data):
 		np_arr = np.fromstring(data.data, np.uint8)
@@ -80,6 +82,14 @@ class GUI_Car():
 		self.lblDeteccion.configure(image=img)
 		self.lblDeteccion.image = img
         #print("Llego un frame")
+	
+	def enabled_sd_callback(self, data):
+		value = data.data
+		if(value == False and self.sd_activated == True):
+			e = None
+			self.activate_selfdriving(e)
+			MessageBox.showerror("Error", "Ha ocurrido un error inesperado en la detección de carril. Se ha desactivado la conducción autonoma. Tome el mando por favor.")
+			
 
 	def publisher(self, commands):
 		self.my_msg.data = [commands[0], commands[1], commands[2], commands[3]]
@@ -221,7 +231,7 @@ class GUI_Car():
 
 		self.label_pwm_vel_gui = Label(text="Velocidad (PWM):")
 		self.label_pwm_vel_gui.place(x = 440, y = 30, width=130)
-		self.pwm_vel_gui = Spinbox(root, from_= 60, to = 100, increment = 10)
+		self.pwm_vel_gui = Spinbox(root, from_= 40, to = 100, increment = 10)
 		#pwm_vel_gui.place_configure(x = 450,y = 150, width = 70)
 		self.pwm_vel_gui.pack(pady = 60)	
 
@@ -288,7 +298,7 @@ pwm_vel = 0
 angle_for_training = 0
 acc_for_training = 0
 num_frame = 0
-num_video = 7 #Cambiar por cada prueba de entrenamiento -------------------------------------------------------    
+num_video = 8 #Cambiar por cada prueba de entrenamiento -------------------------------------------------------    
 
 if __name__ == '__main__':
 	root_aux = GUI_Car()

@@ -11,7 +11,7 @@ import time
 
 class Angle_Acc_CNN():
     angle_acc_cnn = '/home/isaac/pesos_redes/steer.h5'
-    angle_cnn = '/home/isaac/pesos_redes/lane_navigation.h5'
+    angle_cnn = '/home/isaac/pesos_redes/lane_navigationV1.h5'
     enabled_node = False
 
     def __init__(self):
@@ -40,8 +40,13 @@ class Angle_Acc_CNN():
             with self.session.graph.as_default():
                 tf.compat.v1.keras.backend.set_session(self.session)
                 steering_angle_predict = self.model.predict(X)[0]
+                #steering_angle_predict = steering_angle_predict *35
                 print(steering_angle_predict)
                 #time.sleep(0.4)
+                if(steering_angle_predict[0] > 19.0):
+                    steering_angle_predict[0] = 35.0
+                elif(steering_angle_predict[0] < -19.0):
+                    steering_angle_predict[0] = -35.0
                 self.publisher(steering_angle_predict)
     
     def callback_enabled_node(self, data):
